@@ -1,0 +1,418 @@
+---
+title: "**Transcriptome and genome sequencing uncovers functional variation in humans**<br><font color='#A8A8A8' size='5'> Data Visualization Group Project </font><img src='https://fibvisiona.com/sites/default/files/inline-images/logo-upc.png' style='position:absolute;top:0px;left:0px;' width='20%'/>"
+author: "Eira Fontanals Muñoz, Oscar Contreras Parejo, Marc Jordi Torres Valero"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: leonids
+    self_contained: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 4)
+```
+
+```{=html}
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=Times+New+Roman:wght@400;700&display=swap");
+
+  body {
+    font-family: 'Times New Roman', serif;
+  }
+  
+  /* Make bold syntax compile to RU-red */
+  strong {
+    color: #4b789c;
+  }
+
+</style>
+```
+## Description of the Data Set
+
+### Source and Purpose
+
+The dataset is from *Lappalainen et al., Nature 2013*, research paper titled *Transcriptome and genome sequencing uncovers functional variation in humans*, which describes a study that aimed to understand the genetic basis of variation in human traits by analyzing RNA and DNA sequencing data from 462 individuals.
+Related to that, the information was collected from lymphoblastoid cell lines of individuals from five populations: CEPH (CEU), Finns (FIN), British (GBR), Toscani (TSI), and Yoruba (YRI).
+Moreover, the data collection was part of the 1000 Genomes Project, which is a significant reference dataset for human genetic variation.
+So, as a summary, our data set contains expression quantitative trait loci (eQTL) associations, it includes associations between genetic variants (SNPs) and gene expression traits, collected for the purpose of studying genetic regulation of gene expression, and focuses on variants meeting a **False Discovery Rate (FDR) threshold of 5%** or the best association for each gene/unit.
+
+### Variables and Meanings
+
+| Column | Variable Name   | Description                                                                                                                                                | Unit       |
+|------------------|------------------|------------------|------------------|
+| 1      | **SNP_ID**      | Single Nucleotide Polymorphism (SNP) identifier (from dbSNP 137)                                                                                           | \-         |
+| 2      | **ID**          | Always Null (-)                                                                                                                                            | \-         |
+| 3      | **GENE_ID**     | Ensembl gene identifier associated with the SNP (Gencode v12)                                                                                              | \-         |
+| 4      | **PROBE_ID**    | Quantitative trait identifier                                                                                                                              | \-         |
+| 5      | **CHR_SNP**     | Chromosome number where the SNP is located                                                                                                                 | \-         |
+| 6      | **CHR_GENE**    | Chromosome of the quantitative trait                                                                                                                       | \-         |
+| 7      | **SNPpos**      | Position of the SNP on the chromosome                                                                                                                      | Base pairs |
+| 8      | **TSSpos**      | Transcription start site of the gene                                                                                                                       | Base pairs |
+| 9      | **Distance**    | Absolute distance between SNPpos and TSSpos                                                                                                                | Base pairs |
+| 10     | **rvalue**      | Estimated effect size of the SNP, indicating the magnitude of the SNPs effect on the trait being studied, Spearman rank correlation (direction of effect) | \-         |
+| 11     | **pvalue**      | P-value indicating the statistical significance of the SNP                                                                                                 | \-         |
+| 12     | **log10pvalue** | -log10 transformed p-value                                                                                                                                 | \-         |
+
+### Long Format Check
+
+The dataset is in a **wide format** where each row represents a single SNP-gene with multiple columns for different attributes (SNP ID, Gene ID, Chromosome, Position, Effect Size, P-value, etc.).
+However, depending on the analysis, it may need to be reshaped into a long format.
+
+```{r load libraries, echo=FALSE, results=FALSE, message=FALSE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(GGally) # For correlation matrix
+library(ggrepel) # For better labeling
+library(viridis)
+library(MASS) # For log-normal fitting
+library(ggrepel)
+```
+
+## Read the Dataset
+
+```{r import data}
+data <- read.table("data/dataset.txt", header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+colnames(data) <- c("SNP_ID", "ID", "GENE_ID", "PROBE_ID", "CHR_SNP", "CHR_GENE", "SNPpos", "TSSpos", "Distance", "rvalue", "pvalue", "log10pvalue")
+```
+
+## Reshape Data (if necessary)
+
+The dataset is currently in a structured format where each row represents an SNP-gene association.
+However, the ID column contains only hyphens ("-"), which provides no meaningful information.
+Therefore, it is advisable to remove this column to maintain a clean dataset.
+
+Additionally, reshaping the data into a long format may be necessary for certain analyses, such as:
+
+-   If we want to plot multiple metrics (rvalue, pvalue, log10pvalue) together.
+-   If we need to group, summarize, or perform statistical analyses across different metrics.
+
+```{r}
+# Remove 'ID' column
+data <- subset(data, select = -ID)
+# Reshaping the dataset
+data_long <- data %>% pivot_longer(cols = c("rvalue", "pvalue", "log10pvalue"), names_to = "Metric", values_to = "Value")
+head(data_long)
+```
+
+Reshaping the data may be usefull in the scenarios we have specified, even thought, our data can be perfectly analysed using the wide format because we will use only one metric (log10pvalue).
+
+## Check and Update Variable Classes
+
+```{r check classes}
+str(data)
+```
+
+All variables were correctly read, except that SNPpos and Distance were initially detected as numeric instead of integers.
+Also the chromosomes should be expressed by factors (categorical) explicitly convert them to integers to ensure consistency.
+
+```{r update classes}
+data <- data %>%
+  mutate(
+    SNPpos = as.integer(SNPpos),
+    Distance = as.integer(Distance),
+    CHR_SNP = as.factor(CHR_SNP),
+    CHR_GENE = as.factor(CHR_GENE)
+  )
+
+# Checking the updated structure
+str(data)
+```
+
+## Explore Data with ggplot2
+
+### Distribution of Variables
+
+```{r, fig.align="center"}
+# Histogram of a continuous variable (log10pvalue)
+fit <- fitdistr(data$log10pvalue, "lognormal")
+ggplot(data, aes(x = log10pvalue)) +
+  geom_density(fill = "#4b789c", alpha = 0.9) +
+  stat_function(fun = dlnorm, args = list(meanlog = fit$estimate[1], sdlog = fit$estimate[2]), color = "red", linewidth = 1) +
+  geom_vline(xintercept = -log10(0.05), linetype = "dashed", color = "black") +  
+  theme_minimal() +
+  labs(title = "Comparing log10pvalue to Log-Normal Distribution", x = "log10pvalue", y = "Density")+
+  theme(legend.position ='none', plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+```
+
+The density plot of log10pvalue compared to a log-normal distribution shows that all observed values are greater than the threshold indicated by the black dashed line.
+This suggests that the detected eQTL associations are statistically significant, as there are no values falling below this threshold.
+The blue density curve represents the empirical distribution, while the red curve corresponds to the fitted log-normal model.
+The observed right-skewed distribution indicates that while most eQTLs have moderate significance levels, a subset exhibits highly significant associations (large log10pvalues).
+The long tail further highlights the presence of exceptionally strong regulatory variants, which could be key players in gene expression regulation.
+This pattern is expected in eQTL studies, where only a fraction of genetic variants exert strong effects on transcriptional activity.
+
+```{r, figures-side, fig.show="hold", out.width="50%"}
+# Bar plot of a discrete variable (CHR_SNP)
+ggplot(data, aes(x = CHR_SNP, fill=CHR_SNP)) +
+  geom_bar(alpha = 0.8, color = "black", width = 0.8) +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5, size=3) +
+  labs(title = "Distribution of Variants Across Chromosomes", x = "Chromosome", y = "Count") +
+  scale_fill_viridis_d()+
+  theme_minimal()+
+  theme(legend.position ='none', plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+# Graph 2. Bar plot of a discrete variable (CHR_SNP) Normalized
+# Define chromosome lengths as a lookup table
+chr_lengths <- data.frame(
+  CHR_SNP = as.factor(1:22),  
+  chr_length = c(249, 243, 198, 191, 181, 171, 159, 146, 141, 135, 
+                 135, 133, 115, 107, 102, 90, 81, 78, 59, 63, 48, 51)
+)
+
+# Merge the chromosome length data into the main dataset
+data <- left_join(data, chr_lengths, by = "CHR_SNP")
+
+# Compute the normalized count per chromosome
+data_summary <- data %>%
+  group_by(CHR_SNP) %>%
+  summarise(normalized_count = n() / unique(chr_length))  
+
+# Plot the normalized eQTL density
+ggplot(data_summary, aes(x = CHR_SNP, y = normalized_count, fill = CHR_SNP)) +
+  geom_bar(stat = "identity", alpha = 0.8, color = "black", width = 0.8) +
+  geom_text(aes(label = round(normalized_count, 2)), vjust = -0.5, size=3) +  
+  scale_fill_viridis_d() +
+  theme_minimal()+
+  labs(title = "Normalized eQTL Density per Chromosome", x = "Chromosome", y = "Normalized Count") +
+  theme(legend.position ='none', plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+```
+
+Graph 1 shows that Chromosome 1 has the highest number of eQTL associations.
+This can be due to chromosome 1 is the largest human chromosome, containing the highest number of genes (~2,000 genes).
+More genes directly implies more potential regulatory variants.
+Some key regulatory regions might be enriched on Chromosome 1, leading to more detected eQTLs.
+The analysis of normalized eQTL density per chromosome (Graph 2) reveals significant variability in the distribution of regulatory variants across the genome.
+While most chromosomes exhibit a relatively uniform eQTL density, Chromosome 19 and Chromosome 17 stand out with disproportionately high densities, suggesting the presence of key regulatory hotspots or higher transcriptional activity in these regions.
+Conversely, chromosomes such as 4 and 13 display notably lower densities, which may be attributed to lower gene content, fewer functional regulatory elements, or dataset biases.
+These findings highlight potential areas of genomic regulation that warrant further investigation, particularly in relation to gene density, chromatin accessibility, and evolutionary constraints.
+It is also important to note that before normalization, Chromosome 1 had the highest absolute count of eQTLs.
+While this is partially due to its large size, it also suggests that Chromosome 1 plays a crucial role in transcriptional regulation, possibly due to its gene density and regulatory complexity.
+This reinforces the need to consider both absolute and normalized values when interpreting the results.
+
+### Summarizing Data
+
+```{r, fig.align="center"}
+#Boxplot of log10pvalues across chromosomes
+ggplot(data, aes(x = factor(CHR_SNP), y = log10pvalue, fill = factor(CHR_SNP))) +
+  geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(color = "black", size = 0.5, alpha = 0.4) + 
+  scale_fill_viridis_d() +
+  labs(title = "Distribution of log10pvalue Across Chromosomes",
+       x = "Chromosome",
+       y = "log10pvalue") +
+  theme_minimal() +
+  theme(legend.position ='none', plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+
+```
+
+The boxplot displaying the distribution of log10pvalues across chromosomes reveals that while most values are concentrated at lower ranges, there are a considerable number of outliers, indicating highly significant eQTLs on certain chromosomes.
+Notably, some chromosomes, such as 6 and 19, exhibit a wider spread of log10pvalues, suggesting they harbor more significant eQTLs.
+However, due to overlapping distributions and the presence of numerous outliers, it is difficult to discern specific trends or patterns across chromosomes.
+A more refined visualization, such as a violin plot or a Manhattan plot, could help improve the clarity of these findings.
+
+### Selecting the Best Graphs
+
+```{r, fig.align="center"}
+#Violin plot of log10pvalues across chromosomes
+ggplot(data, aes(x = as.factor(CHR_SNP), y = log10pvalue, fill = as.factor(CHR_SNP))) +
+  geom_jitter(color = "black", size = 0.3, alpha = 0.4) + 
+  geom_violin() +
+  geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.6) +
+  geom_hline(yintercept = 100, linetype = "dashed", color = "red") + # Variants exceeding this threshold are considered extremely strong candidates for functional regulatory elements.
+  scale_fill_viridis_d() +
+  labs(title = "Violin Plot of log10pvalue Across Chromosomes",
+       x = "Chromosome",
+       y = "log10pvalue") +
+  theme_minimal() +
+  theme(legend.position = "none")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+```
+
+The violin plot allows us to pinpoint chromosomes harboring the most highly significant eQTLs, particularly those exceeding the log10pvalue threshold of 100.
+Chromosomes 1, 5, 6, 12, and 17 emerge as key regions containing exceptionally strong regulatory variants.
+This does not diminish the relevance of other chromosomes but instead focuses on those with the most extreme values.
+Additionally, the density of these highly significant eQTLs varies across chromosomes, indicating that different regions may contribute differently to transcriptional regulation.
+To further investigate which specific variants are driving these signals, a Manhattan plot could be used to visualize their genomic locations and significance levels, providing a more detailed view of eQTL distribution across the genome.
+
+```{r, fig.align="center"}
+#Manhattan plot of log10pvalues across chromosomes
+
+# Define significance threshold
+threshold <- 100
+
+# Create a subset of the data for SNPs with log10pvalue > threshold
+highlight_snps <- data[data$log10pvalue > threshold, ]
+
+# Manhattan Plot
+manhattan_plot <- ggplot(data, aes(x = CHR_SNP, y = log10pvalue)) + 
+  geom_point(aes(color = log10pvalue), alpha = 0.8, size = 1.5) +
+  scale_color_gradient(low = "#355573", high = "#bed93b")+
+  labs(title = "Manhattan Plot of log10(p-values) Across Chromosomes",
+       x = "Chromosome", y = "log10(p-value)") +  
+  theme_minimal() +
+  geom_hline(yintercept = threshold, color = "black", linetype = "dashed", linewidth = 0.2) +
+  geom_label_repel(data = highlight_snps, 
+                   aes(label = SNP_ID, alpha=0.7), 
+                   size = 3, color = "black", 
+                   force = 1.7, 
+                   box.padding = 0.5) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14),  
+        axis.title = element_text(size = 14),
+        legend.position = "none",  
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank())
+
+manhattan_plot
+```
+
+To further investigate which specific variants are driving these signals, we use the Manhattan plot, which provides a clearer view of individual SNPs with the highest significance.
+As seen in the plot, variants such as rs12123978, rs2910686, rs1059307, rs6907751, rs10876864, and rs11080327 stand out as key eQTLs surpassing the threshold.
+These SNPs may represent important regulatory elements influencing gene expression.
+Further functional analysis of these variants could provide valuable insights into their biological roles in transcriptional regulation.
+
+```{r, fig.align="center"}
+#Heat map plot of distance across chromosomes
+# Bin log10pvalue to group them into ranges
+data$log10p_bin <- cut(data$log10pvalue, breaks = seq(0, max(data$log10pvalue), by = 1), include.lowest = TRUE)
+
+# Create heatmap of log10pvalue distribution across chromosomes
+heatmap_plot <- ggplot(data, aes(x = as.factor(CHR_SNP), y = log10p_bin, fill = ..count..)) +
+  geom_tile(stat = "bin2d", bins = 50) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Heatmap of log10(p-values) Across Chromosomes",
+       x = "Chromosome", y = "log10(p-value)", fill = "Density") +
+  theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank() 
+        )
+
+heatmap_plot
+```
+
+The heatmap of log10(p-value) distributions across chromosomes provides a clear visualization of the density of significant eQTL associations, where color intensity represents concentration, with higher densities appearing in yellow and green and lower densities in purple. From this plot, we observe that chromosomes 1 and 19 exhibit a higher density of extreme log10(p-values, surpassing 100), suggesting that these chromosomes contain more biologically relevant regulatory variants. While lower log10(p-value) signals are widespread across all chromosomes, only a small subset of SNPs reach extremely high significance, reinforcing the presence of key regulatory elements. Additionally, certain chromosomes display isolated peaks, indicating particularly significant SNPs in specific regions. This heatmap directly aligns with findings from the normalized eQTL density histogram, confirming that chromosomes 1 and 19 play a critical role in eQTL significance. By effectively highlighting genomic regions with high concentrations of significant eQTLs, this visualization serves as a valuable tool for prioritizing further functional analysis.
+
+```{r, fig.align="center"}
+#Scatter Plot of Distance vs. log10pvalue
+ggplot(data, aes(x = Distance, y = log10pvalue)) +
+  geom_point(alpha = 0.5, color = "#4b789c") +
+  geom_smooth(method = "loess", color = "red", linewidth = 1) +  # Smoothed trend line
+  theme_minimal() +
+  labs(title = "Scatter Plot of Distance and log10pvalue",
+       x = "Distance", y = "log10pvalue") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+```
+The scatter plot reveals a clear tendency where higher log10pvalues are concentrated at shorter distances (near 0).
+This suggests that SNPs located closer to genes tend to have stronger regulatory effects on gene expression, reinforcing the idea that cis-eQTLs (variants acting near their target genes) are more likely to be significant than trans-eQTLs (variants acting at long distances).
+This finding aligns with known biological mechanisms, as proximal regulatory elements such as promoters and enhancers often have a stronger influence on transcriptional activity than distal elements.
+However, some significant SNPs at longer distances could indicate the presence of long-range chromatin interactions or trans-regulatory effects.
+Further analysis could explore whether specific chromosomes or gene types exhibit stronger cis- or trans-regulatory patterns.
+
+```{r, fig.align="center"}
+#Scatter Plot of Distance and log10pvalue Per Chromosome
+ggplot(data, aes(x = Distance, y = log10pvalue, color = log10pvalue)) +
+  geom_point(alpha = 0.5) +
+  scale_color_viridis_c() +
+  theme_minimal() +
+  labs(title = "Scatter Plot of Distance and log10pvalue Per Chromosome",
+       x = "Distance", y = "log10pvalue", color = "log10pvalue") +
+  facet_wrap(~CHR_SNP, scales = "free") +
+  theme(legend.position = "right")+
+  theme( plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+```
+
+The following plot shows the relationship between distance and log10(p-value) for SNPs across all chromosomes.
+A clear trend is observed where higher log10(p-values) are concentrated at lower distances, suggesting that the most significant eQTLs tend to be located closer to the genes they regulate.
+However, with all chromosomes included, the visualization becomes cluttered, making it difficult to distinguish which chromosomes harbor the most significant regulatory variants.
+Since the objective is to analyze the most significant SNPs (log10pvalue>100) and determine whether they are located at the shortest possible distances, we could exclude chromosomes that do not contain such highly significant variants.
+This approach would allow a clearer and more interpretative visualization, focusing only on regions where the strongest regulatory signals occur.
+
+```{r, fig.align="center"}
+# Scatter plot of significant chromosomes
+# Define threshold for significance
+threshold <- 100  
+
+# Filter chromosomes that contain at least one log10pvalue > 100
+significant_chr <- unique(data$CHR_SNP[data$log10pvalue > threshold])
+
+# Subset data to only include those chromosomes
+filtered_data <- data[data$CHR_SNP %in% significant_chr, ]
+
+# Subset data for labeling significant SNPs
+highlight_snps <- filtered_data[filtered_data$log10pvalue > threshold, ]
+
+# Plot
+scatter_plot <- ggplot(filtered_data, aes(x = Distance, y = log10pvalue, color = log10pvalue)) +
+  geom_point(alpha = 0.5) +
+  scale_color_viridis_c() +  
+  facet_wrap(~CHR_SNP, scales = "free") +
+  geom_label_repel(data = highlight_snps, 
+                   aes(label = SNP_ID), 
+                   size = 3, color = "black", 
+                   force = 1.5, 
+                   box.padding = 0.5,
+                   alpha=0.7) + 
+  theme_minimal() +
+  labs(title = "Scatter Plot of Distance and log10pvalue (Sig. Chr.)",
+       x = "Distance", y = "log10pvalue", color = "log10pvalue") +
+  theme(legend.position = "right")+
+  theme( plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+scatter_plot
+```
+
+The refined scatter plot demonstrates that the highest log10pvalues (>100) are found at very short distances, confirming that the most significant regulatory variants are predominantly cis-eQTLs (acting near their target genes).
+This supports the hypothesis that strong eQTL signals tend to be closer to the regulated genes, emphasizing the importance of proximal regulatory elements such as enhancers and promoters.
+Chromosomes 1, 5, 6, 12, and 17 contain the most significant SNPs, highlighting potential regulatory hotspots in these regions.
+These findings align with previous Manhattan plot observations, reinforcing the evidence that eQTL significance is inversely related to distance.
+
+Finally, we can say that the best plots are the Manhattan plot, the heat map plot and the scatter plot of distance and log10p-value of significant chromosomes:
+
+```{r, echo=FALSE, fig.show="hold", out.width="33%"}
+heatmap_plot
+manhattan_plot
+scatter_plot
+```
+
+## Final conclusions
+
+During this analysis, we aimed to identify chromosomes with a high density of variants and determine which chromosomes contained the most highly significant eQTLs.
+Our findings indicate that the heatmap plot is the most effective visualization for this purpose, aligning with the results from the normalized eQTL density histogram.
+By using the heatmap, we could clearly see that chromosomes 1 and 19 are the most important, as they contain a higher density of variants.
+In contrast, histograms of log10(p-values) per chromosome required normalization before conclusions could be drawn, making them a less direct method.
+This makes the heatmap a more straightforward and interpretable solution for identifying key regions of interest.
+
+To determine which SNPs had the highest significance, we used a Manhattan plot with a log10(p-value) threshold of 100.
+All the SNPs in our dataset were significant, but to extract a small, highly relevant group, we applied this strict threshold.
+If we had selected a lower threshold, such as 50, we would still obtain very important SNPs, but the number of results would be much larger.
+Our goal was to isolate only the most extreme and biologically relevant SNPs, ensuring that our conclusions were based on the most impactful variants.
+Using this approach, we identified six key SNPs:
+
+-   **rs12123978**: Classified as an intron variant and genic downstream transcript variant, suggesting a potential regulatory role.
+
+-   **rs2910686**: An intron variant, strongly associated with ERAP2 expression in inflammatory diseases such as IBD, psoriasis, and ankylosing spondylitis [PMID 28083616, 32360304].
+
+-   **rs1059307**: Found in upstream transcript regions, linked to gastric cancer susceptibility and prognosis in a Chinese population.
+
+-   **rs6907751**: An intron variant, which may play a role in gene splicing or regulation.
+
+-   **rs10876864**: A regulatory region variant, associated with autoimmune diseases and type 1 diabetes [PMID 18840781, 19956108, 19966804, 20668683, 21559886].
+
+-   **rs11080327**: Identified as an upstream and intron variant, possibly influencing transcriptional regulation.
+
+One of the most critical insights from our analysis was the strong inverse relationship between SNP distance and log10(p-value).
+We observed that shorter distances were correlated with higher significance, meaning that the most relevant SNPs tend to be positioned close to functional genomic regions.
+To further validate this pattern, we used a scatter plot divided by chromosome, confirming that the six highly significant SNPs exhibited this trend.
+This highlights the importance of distance as a key variable in eQTL significance, suggesting that SNPs located near regulatory regions are more likely to have a strong impact on gene expression.
+
+Overall, our findings suggest that heatmaps and Manhattan plots provide the clearest insights into eQTL significance and SNP distributions.
+The scatter plot further reinforces the idea that significant SNPs are clustered near their target genes, emphasizing the role of distance in genetic regulation.
+By setting a high significance threshold, we successfully isolated a small, biologically relevant group of SNPs, which gave us a focused selection where all identified SNPs were associated with important biological functions and disease risks.
+Future research should focus on functional validation of these SNPs in disease contexts, particularly in immune-related conditions and cancer, to further understand their biological roles.
