@@ -1,4 +1,4 @@
-# Human eQTL Data Visualization
+# Human eQTL Data Visualization 
 
 This repository presents an exploratory data visualization project based on the eQTL resource from **Lappalainen et al., Nature (2013)**. The aim of the project is to explore the distribution, strength, and genomic organization of expression quantitative trait loci (eQTLs) across human chromosomes using clear statistical summaries and visual analysis.
 
