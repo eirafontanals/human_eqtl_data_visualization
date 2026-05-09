@@ -69,11 +69,40 @@ The project includes visualizations such as:
 - Heatmaps summarizing chromosome-level significance patterns
 - Exploratory comparisons of genomic regions with stronger regulatory enrichment
 
+## Interactive Shiny Application
+
+An interactive Shiny application was developed to complement the static visualizations included in this repository. The app allows dynamic exploration of eQTL association patterns across human chromosomes using interactive filtering and Plotly-based visualization.
+
+### Features
+
+- Interactive heatmap of `log10pvalue` distributions across chromosomes
+- Manhattan plot with clickable SNP identification
+- Dynamic chromosome-specific scatter plots
+- Adjustable significance filtering using sliders
+- Interactive exploration of highly significant regulatory variants
+
+### Technologies used
+
+- R Shiny
+- ggplot2
+- plotly
+- dplyr
+- viridis
+- ggrepel
+
+### Run locally
+
+```r
+library(shiny)
+runApp("app.R")
+```
+
 ## Repository structure
 
 ```bash
 .
 ├── README.md
+├── app.R
 ├── human_eqtl_data_visualization.Rmd
 ├── human_eqtl_data_visualization.html
 ├── data/
